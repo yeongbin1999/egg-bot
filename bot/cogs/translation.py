@@ -1,4 +1,5 @@
 import asyncio
+import re
 from typing import Optional
 
 import discord
@@ -56,6 +57,41 @@ LANGUAGE_NAMES = {
     "ja": "🇯🇵 日本語",
     "zh-TW": "🇹🇼 繁體中文 (台灣)",
 }
+
+
+# =========================================================
+# DISCORD TIMESTAMP RESTORE
+# =========================================================
+
+def restore_discord_timestamps(
+    text: str
+) -> str:
+    """
+    번역 과정에서 공백이 생긴 Discord timestamp 문법을 복구합니다.
+
+    예:
+        <t : 1757588400 : R>
+        <t:1757588400 :R>
+        <t :1757588400:R>
+        <t : 1757588400>
+        <t:1757588400>
+
+    ->
+        <t:1757588400:R>
+        <t:1757588400>
+    """
+
+    if not text:
+        return text
+
+    return re.sub(
+        r"<\s*t\s*[:：]\s*(\d+)\s*[:：]?\s*([tTdDfFR])?\s*>",
+        lambda match: (
+            f"<t:{match.group(1)}"
+            f"{':' + match.group(2) if match.group(2) else ''}>"
+        ),
+        text
+    )
 
 
 # =========================================================
@@ -206,18 +242,22 @@ class Translation(commands.Cog):
             return None
 
         referenced_message_id = message.reference.message_id
+
         if referenced_message_id is None:
             return None
 
         parent_source_message_id = None
         parent_source_channel_id = None
+
         parent_mappings = await get_message_mappings(
             referenced_message_id,
             message.channel.id
         )
 
-        # 번역 메시지에 답글을 단 경우에는 번역본에서 원문을 역추적합니다.
+        # 번역 메시지에 답글을 단 경우에는
+        # 번역본에서 원문을 역추적합니다.
         if not parent_mappings:
+
             parent_source = await get_source_message_mapping(
                 referenced_message_id,
                 message.channel.id
@@ -229,6 +269,7 @@ class Translation(commands.Cog):
             ):
                 parent_source_message_id = parent_source[1]
                 parent_source_channel_id = parent_source[2]
+
                 parent_mappings = await get_message_mappings(
                     parent_source_message_id,
                     parent_source_channel_id
@@ -241,6 +282,7 @@ class Translation(commands.Cog):
             parent_webhook_url,
             parent_language
         ) in parent_mappings:
+
             if (
                 parent_group_id == source["group_id"]
                 and parent_target_channel_id == target_channel_id
@@ -251,7 +293,8 @@ class Translation(commands.Cog):
                     guild_id=message.guild.id
                 )
 
-        # 답글을 원문의 언어 채널로 번역할 때는 원문을 부모로 사용합니다.
+        # 답글을 원문의 언어 채널로 번역할 때는
+        # 원문을 부모로 사용합니다.
         if (
             parent_source_message_id is not None
             and parent_source_channel_id == target_channel_id
@@ -358,6 +401,14 @@ class Translation(commands.Cog):
                     )
                 )
 
+                # -------------------------------------------------
+                # Discord Timestamp 문법 복구
+                # -------------------------------------------------
+
+                translated = restore_discord_timestamps(
+                    translated
+                )
+
             except Exception as e:
 
                 print(
@@ -408,9 +459,11 @@ class Translation(commands.Cog):
         reply_prefix = ""
 
         if reference is not None:
+
             author_name = discord.utils.escape_markdown(
                 message.author.display_name
             )
+
             reply_prefix = f"{author_name}: "
 
         # -----------------------------------------------------
@@ -445,7 +498,9 @@ class Translation(commands.Cog):
         async def deliver(
             active_webhook: discord.Webhook
         ):
+
             if reference is not None:
+
                 return await target_channel.send(
                     outgoing_content,
                     files=attachments,
@@ -461,16 +516,22 @@ class Translation(commands.Cog):
             )
 
         try:
-            sent_message = await deliver(webhook)
+
+            sent_message = await deliver(
+                webhook
+            )
 
         except discord.NotFound as e:
 
-            # 저장된 URL의 webhook이 삭제되었거나 토큰이 무효해진 경우입니다.
+            # 저장된 URL의 webhook이 삭제되었거나
+            # 토큰이 무효해진 경우입니다.
             if reference is not None:
+
                 print(
                     f"답글 번역 대상 메시지를 찾을 수 없습니다: "
                     f"#{target_channel.name}: {e}"
                 )
+
                 return
 
             print(
@@ -493,35 +554,51 @@ class Translation(commands.Cog):
                 webhook.url
             )
 
-            # 첫 요청 뒤 파일 객체는 닫히므로 원본 첨부파일에서 다시 만듭니다.
+            # 첫 요청 뒤 파일 객체는 닫히므로
+            # 원본 첨부파일에서 다시 만듭니다.
             attachments = []
 
             for source_attachment in message.attachments:
+
                 try:
+
                     attachments.append(
                         await source_attachment.to_file()
                     )
+
                 except Exception as attachment_error:
+
                     print(
                         f"재연결 첨부파일 처리 실패 "
                         f"{source_attachment.filename}: "
                         f"{attachment_error}"
                     )
+
                     return
 
             try:
-                sent_message = await deliver(webhook)
+
+                sent_message = await deliver(
+                    webhook
+                )
+
             except discord.Forbidden:
+
                 print(
                     f"Webhook 전송 권한이 없습니다: "
                     f"#{target_channel.name}"
                 )
+
                 return
+
             except discord.HTTPException as retry_error:
+
                 print(
                     f"Webhook 재연결 후 전송 실패 "
-                    f"#{target_channel.name}: {retry_error}"
+                    f"#{target_channel.name}: "
+                    f"{retry_error}"
                 )
+
                 return
 
         except discord.Forbidden:
@@ -683,6 +760,7 @@ class Translation(commands.Cog):
             return
 
         async def edit_one(mapping):
+
             (
                 group_id,
                 target_message_id,
@@ -696,22 +774,42 @@ class Translation(commands.Cog):
 
             edit_kwargs = {}
 
+            # -------------------------------------------------
+            # 본문 수정
+            # -------------------------------------------------
+
             if sync_content:
+
                 translated = None
 
                 if message.content.strip():
+
                     try:
-                        translated = await self.translation_service.translate(
-                            text=message.content,
-                            source=source["language"],
-                            target=target_language
+
+                        translated = (
+                            await self.translation_service.translate(
+                                text=message.content,
+                                source=source["language"],
+                                target=target_language
+                            )
                         )
+
+                        # -----------------------------------------
+                        # Discord Timestamp 문법 복구
+                        # -----------------------------------------
+
+                        translated = restore_discord_timestamps(
+                            translated
+                        )
+
                     except Exception as e:
+
                         print(
                             f"수정 번역 실패 "
                             f"[{source['language']} -> "
                             f"{target_language}]: {e}"
                         )
+
                         return
 
                 reply_reference = await self.get_reply_reference(
@@ -723,74 +821,115 @@ class Translation(commands.Cog):
                 reply_prefix = ""
 
                 if reply_reference is not None:
+
                     author_name = discord.utils.escape_markdown(
                         message.author.display_name
                     )
+
                     reply_prefix = f"{author_name}: "
 
-                # None을 전달하면 번역 메시지의 본문도 비워집니다.
+                # None을 전달하면
+                # 번역 메시지의 본문도 비워집니다.
                 edit_kwargs["content"] = (
                     f"{reply_prefix}{translated}"
                     if translated
                     else (reply_prefix or None)
                 )
 
+            # -------------------------------------------------
+            # 첨부파일 수정
+            # -------------------------------------------------
+
             if sync_attachments:
+
                 files = []
 
                 for attachment in message.attachments:
+
                     try:
-                        files.append(await attachment.to_file())
+
+                        files.append(
+                            await attachment.to_file()
+                        )
+
                     except Exception as e:
-                        # 일부만 반영하면 원본과 번역본이 더 달라지므로
-                        # 이번 수정은 건너뛰고 기존 번역본을 보존합니다.
+
+                        # 일부만 반영하면 원본과 번역본이
+                        # 더 달라지므로 이번 수정은 건너뜁니다.
                         print(
                             f"수정 첨부파일 처리 실패 "
                             f"{attachment.filename}: {e}"
                         )
+
                         return
 
-                # 새 파일 목록만 전달해 기존 첨부파일을 완전히 교체합니다.
-                # 빈 목록은 번역 메시지의 첨부파일을 모두 삭제합니다.
+                # 새 파일 목록만 전달해
+                # 기존 첨부파일을 완전히 교체합니다.
+                #
+                # 빈 목록은 번역 메시지의
+                # 첨부파일을 모두 삭제합니다.
                 edit_kwargs["attachments"] = files
 
             try:
+
                 target_channel = self.bot.get_channel(
                     target_channel_id
                 )
 
-                if isinstance(target_channel, discord.TextChannel):
-                    target_message = await target_channel.fetch_message(
-                        target_message_id
+                if isinstance(
+                    target_channel,
+                    discord.TextChannel
+                ):
+
+                    target_message = (
+                        await target_channel.fetch_message(
+                            target_message_id
+                        )
                     )
 
-                    # 답글은 일반 봇 메시지로 전송되므로 해당 방식으로 수정합니다.
+                    # 답글은 일반 봇 메시지로 전송되므로
+                    # 해당 방식으로 수정합니다.
                     if target_message.webhook_id is None:
-                        await target_message.edit(**edit_kwargs)
+
+                        await target_message.edit(
+                            **edit_kwargs
+                        )
+
                         return
 
                 webhook = discord.Webhook.from_url(
                     webhook_url,
                     client=self.bot
                 )
+
                 await webhook.edit_message(
                     target_message_id,
                     **edit_kwargs
                 )
+
             except discord.NotFound:
+
                 print(
                     f"수정 대상 메시지를 찾을 수 없습니다: "
                     f"{target_message_id}"
                 )
+
             except discord.Forbidden:
+
                 print(
                     f"번역 메시지 수정 권한이 없습니다: "
                     f"{target_message_id}"
                 )
-            except discord.HTTPException as e:
-                print(f"번역 메시지 수정 실패: {e}")
 
-        await asyncio.gather(*(edit_one(mapping) for mapping in mappings))
+            except discord.HTTPException as e:
+
+                print(
+                    f"번역 메시지 수정 실패: {e}"
+                )
+
+        await asyncio.gather(
+            *(edit_one(mapping) for mapping in mappings)
+        )
 
     @commands.Cog.listener()
     async def on_message_edit(
@@ -817,7 +956,10 @@ class Translation(commands.Cog):
         # 본문과 첨부파일 모두 바뀌지 않았으면 무시
         # -----------------------------------------------------
 
-        content_changed = before.content != after.content
+        content_changed = (
+            before.content != after.content
+        )
+
         attachments_changed = (
             self.attachment_signature(before)
             != self.attachment_signature(after)
@@ -855,16 +997,33 @@ class Translation(commands.Cog):
     ):
         """캐시에 없는 메시지의 수정도 동기화합니다."""
 
-        if payload.cached_message is not None or payload.guild_id is None:
+        if (
+            payload.cached_message is not None
+            or payload.guild_id is None
+        ):
             return
 
-        channel = self.bot.get_channel(payload.channel_id)
-        if not isinstance(channel, discord.TextChannel):
+        channel = self.bot.get_channel(
+            payload.channel_id
+        )
+
+        if not isinstance(
+            channel,
+            discord.TextChannel
+        ):
             return
 
         try:
-            message = await channel.fetch_message(payload.message_id)
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+
+            message = await channel.fetch_message(
+                payload.message_id
+            )
+
+        except (
+            discord.NotFound,
+            discord.Forbidden,
+            discord.HTTPException
+        ):
             return
 
         if message.author.bot:
@@ -878,7 +1037,8 @@ class Translation(commands.Cog):
         if source is None or not source["enabled"]:
             return
 
-        # 캐시된 이전 상태가 없으므로 본문과 첨부파일을 모두 최신 상태로 맞춥니다.
+        # 캐시된 이전 상태가 없으므로
+        # 본문과 첨부파일을 모두 최신 상태로 맞춥니다.
         await self.sync_message_edit(
             message,
             source,
@@ -922,18 +1082,27 @@ class Translation(commands.Cog):
             ) = mapping
 
             try:
+
                 target_channel = self.bot.get_channel(
                     target_channel_id
                 )
 
-                if isinstance(target_channel, discord.TextChannel):
-                    target_message = await target_channel.fetch_message(
-                        target_message_id
+                if isinstance(
+                    target_channel,
+                    discord.TextChannel
+                ):
+
+                    target_message = (
+                        await target_channel.fetch_message(
+                            target_message_id
+                        )
                     )
 
-                    # webhook 토큰이 바뀌어도 봇의 Manage Messages 권한으로
+                    # webhook 토큰이 바뀌어도
+                    # 봇의 Manage Messages 권한으로
                     # 대상 메시지를 직접 삭제할 수 있습니다.
                     await target_message.delete()
+
                     return True
 
                 if not webhook_url:
@@ -944,11 +1113,16 @@ class Translation(commands.Cog):
                     client=self.bot
                 )
 
-                await webhook.delete_message(target_message_id)
+                await webhook.delete_message(
+                    target_message_id
+                )
+
                 return True
 
             except discord.NotFound:
-                # 대상이 이미 삭제된 경우에도 동기화 상태는 완료입니다.
+
+                # 대상이 이미 삭제된 경우에도
+                # 동기화 상태는 완료입니다.
                 return True
 
             except discord.Forbidden:
@@ -957,6 +1131,7 @@ class Translation(commands.Cog):
                     f"번역 메시지 삭제 권한이 없습니다: "
                     f"{target_message_id}"
                 )
+
                 return False
 
             except discord.HTTPException as e:
@@ -964,6 +1139,7 @@ class Translation(commands.Cog):
                 print(
                     f"번역 메시지 삭제 실패: {e}"
                 )
+
                 return False
 
         delete_results = await asyncio.gather(
@@ -978,6 +1154,7 @@ class Translation(commands.Cog):
         # -----------------------------------------------------
 
         if all(delete_results):
+
             await delete_message_mappings(
                 source_message_id,
                 source_channel_id
@@ -989,7 +1166,10 @@ class Translation(commands.Cog):
         message: discord.Message
     ):
 
-        if message.guild is None or message.author.bot:
+        if (
+            message.guild is None
+            or message.author.bot
+        ):
             return
 
         await self.sync_message_delete(
@@ -1004,7 +1184,10 @@ class Translation(commands.Cog):
     ):
         """캐시에 없는 원본 메시지의 삭제도 동기화합니다."""
 
-        if payload.cached_message is not None or payload.guild_id is None:
+        if (
+            payload.cached_message is not None
+            or payload.guild_id is None
+        ):
             return
 
         await self.sync_message_delete(
@@ -1025,11 +1208,16 @@ class Translation(commands.Cog):
                 message.channel.id
             )
             for message in messages
-            if message.guild is not None and not message.author.bot
+            if (
+                message.guild is not None
+                and not message.author.bot
+            )
         ]
 
         if tasks:
-            await asyncio.gather(*tasks)
+            await asyncio.gather(
+                *tasks
+            )
 
     @commands.Cog.listener()
     async def on_raw_bulk_message_delete(
@@ -1041,7 +1229,8 @@ class Translation(commands.Cog):
         if payload.guild_id is None:
             return
 
-        # 캐시된 메시지는 on_bulk_message_delete에서 처리합니다.
+        # 캐시된 메시지는
+        # on_bulk_message_delete에서 처리합니다.
         cached_ids = {
             message.id
             for message in payload.cached_messages
@@ -1057,7 +1246,9 @@ class Translation(commands.Cog):
         ]
 
         if tasks:
-            await asyncio.gather(*tasks)
+            await asyncio.gather(
+                *tasks
+            )
 
     # =========================================================
     # GROUP CREATE
@@ -1628,24 +1819,34 @@ class Translation(commands.Cog):
         """현재 채널에서 최근 메시지를 지정한 수만큼 삭제합니다."""
 
         if interaction.guild is None:
+
             await interaction.response.send_message(
                 "❌ 서버 채널에서만 사용할 수 있습니다.",
                 ephemeral=True
             )
+
             return
 
         channel = interaction.channel
 
-        if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+        if not isinstance(
+            channel,
+            (discord.TextChannel, discord.Thread)
+        ):
+
             await interaction.response.send_message(
                 "❌ 메시지를 삭제할 수 있는 채널에서 사용해주세요.",
                 ephemeral=True
             )
+
             return
 
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(
+            ephemeral=True
+        )
 
         try:
+
             deleted = await channel.purge(
                 limit=count,
                 reason=(
@@ -1653,19 +1854,28 @@ class Translation(commands.Cog):
                     f"({interaction.user.id})"
                 )
             )
+
         except discord.Forbidden:
+
             await interaction.edit_original_response(
                 content=(
                     "❌ 메시지를 삭제할 권한이 없습니다. "
                     "봇에 `Manage Messages` 권한이 있는지 확인해주세요."
                 )
             )
+
             return
+
         except discord.HTTPException as e:
-            print(f"메시지 삭제 실패: {e}")
+
+            print(
+                f"메시지 삭제 실패: {e}"
+            )
+
             await interaction.edit_original_response(
                 content="❌ 메시지 삭제 중 오류가 발생했습니다."
             )
+
             return
 
         await interaction.edit_original_response(
