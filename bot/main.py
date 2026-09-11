@@ -40,6 +40,10 @@ async def main():
         "bot.cogs.welcome"
     )
 
+    await bot.load_extension(
+        "bot.cogs.forum"
+    )
+
     await bot.start(DISCORD_TOKEN)
 
 

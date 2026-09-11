@@ -68,6 +68,15 @@ async def init_db():
             )
         """)
 
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS forum_settings (
+                guild_id INTEGER NOT NULL,
+                channel_id INTEGER NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                PRIMARY KEY(guild_id, channel_id)
+            )
+        """)
+
         await db.commit()
 
 
@@ -654,3 +663,68 @@ async def get_welcome_messages(guild_id: int):
             (guild_id,)
         )
         return await cursor.fetchall()
+
+
+# =========================================================
+# FORUM
+# =========================================================
+
+async def add_forum_channel(guild_id: int, channel_id: int) -> bool:
+    """포럼 채널을 자동 정리 대상으로 등록합니다."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT INTO forum_settings (guild_id, channel_id, enabled)
+            VALUES (?, ?, 1)
+            ON CONFLICT(guild_id, channel_id) DO UPDATE SET enabled = 1
+            """,
+            (guild_id, channel_id)
+        )
+        await db.commit()
+        return True
+
+
+async def remove_forum_channel(guild_id: int, channel_id: int) -> bool:
+    """포럼 채널을 자동 정리 대상에서 해제합니다."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            DELETE FROM forum_settings
+            WHERE guild_id = ? AND channel_id = ?
+            """,
+            (guild_id, channel_id)
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+async def get_forum_channels(guild_id: int) -> list[int]:
+    """등록된 포럼 채널 ID 목록을 가져옵니다."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            SELECT channel_id
+            FROM forum_settings
+            WHERE guild_id = ? AND enabled = 1
+            ORDER BY channel_id
+            """,
+            (guild_id,)
+        )
+        rows = await cursor.fetchall()
+        return [r[0] for r in rows]
+
+
+async def is_forum_channel_monitored(guild_id: int, channel_id: int) -> bool:
+    """해당 채널이 감시 대상 포럼 채널인지 확인합니다."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            SELECT 1
+            FROM forum_settings
+            WHERE guild_id = ? AND channel_id = ? AND enabled = 1
+            LIMIT 1
+            """,
+            (guild_id, channel_id)
+        )
+        row = await cursor.fetchone()
+        return row is not None
